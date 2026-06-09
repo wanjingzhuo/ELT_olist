@@ -36,6 +36,7 @@ payments AS (
 final AS (
     SELECT
         -- Keys
+        {{ dbt_utils.generate_surrogate_key(['oi.order_id', 'oi.order_item_id']) }} AS order_item_sk,
         oi.order_id,
         oi.order_item_id,
         o.customer_id,

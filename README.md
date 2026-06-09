@@ -43,8 +43,20 @@ The raw data consists of 9 tables (~1.1M records) loaded into BigQuery under the
 | `dim_customers` | Customers enriched with lat/lng from geolocation | Customer distribution by state, repeat vs one-time buyers |
 | `dim_products` | Products with English category name, photos, dimensions | Best performing categories, does photo count affect sales? |
 | `dim_sellers` | Sellers enriched with lat/lng from geolocation | Seller distribution by state, top sellers by revenue |
-| `fact_orders` | One row per order item — joins orders, items, payments. Includes `delivery_days`, `estimated_delivery_days`, `is_late` | Revenue by month/category/state, late delivery rate, freight analysis |
+| `fact_orders` | One row per order item. PK: `order_item_sk` (surrogate key). Includes `delivery_days`, `estimated_delivery_days`, `is_late` | Revenue by month/category/state, late delivery rate, freight analysis |
 | `fact_reviews` | One row per review with `sentiment` derived from `review_score` | Average score by seller/product, sentiment distribution, delivery vs rating correlation |
+
+### Joining the marts
+
+| Join | Column to use |
+|---|---|
+| `fact_orders` → `dim_customers` | `customer_id` |
+| `fact_orders` → `dim_products` | `product_id` |
+| `fact_orders` → `dim_sellers` | `seller_id` |
+| `fact_reviews` → `fact_orders` | `order_id` |
+| `fact_reviews` → `dim_customers` | `customer_id` |
+
+> `order_item_sk` is the row identifier for `fact_orders` — use it as the PK in tests, not as a join key.
 
 ---
 
