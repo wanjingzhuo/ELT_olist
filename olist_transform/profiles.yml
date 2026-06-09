@@ -1,0 +1,14 @@
+olist_transform:
+  outputs:
+    dev:
+      dataset: olist_transformed
+      job_execution_timeout_seconds: 300
+      job_retries: 1
+      keyfile: /Users/mudkip/Desktop/olist-498903-e7f8763e517a.json
+      location: US
+      method: service-account
+      priority: interactive
+      project: olist-498903
+      threads: 4
+      type: bigquery
+  target: dev

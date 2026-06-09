@@ -1,0 +1,31 @@
+default_environment: dev
+project_id: 019eaa81-6918-77a8-ac8e-40637539f75a
+environments:
+- name: dev
+- name: staging
+- name: prod
+plugins:
+  extractors:
+  - name: tap-postgres
+    variant: meltanolabs
+    pip_url: meltanolabs-tap-postgres
+    config:
+      database: postgres
+      filter_schemas:
+      - public
+      host: aws-1-ap-southeast-1.pooler.supabase.com
+      port: 5432
+      user: postgres.teopuqkikgolfkduudaj
+  loaders:
+  - name: target-bigquery
+    variant: z3z1ma
+    pip_url: git+https://github.com/z3z1ma/target-bigquery.git setuptools<80
+    config:
+      batch_size: 104857600
+      credentials_path: /Users/mudkip/Desktop/olist-498903-e7f8763e517a.json
+      dataset: olist_raw
+      denormalized: true
+      flattening_enabled: true
+      flattening_max_depth: 1
+      method: batch_job
+      project: olist-498903

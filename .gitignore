@@ -1,0 +1,7 @@
+.env
+*.json
+data/
+.DS_Store
+__pycache__/
+*.pyc
+olist_meltano/.meltano/
