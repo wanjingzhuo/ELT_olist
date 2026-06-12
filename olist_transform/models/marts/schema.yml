@@ -175,14 +175,18 @@ models:
 
   - name: fact_reviews
     description: >
-      Review fact table at the grain of one row per review. Enriched with customer_id
-      from orders and a derived sentiment classification.
+      Review fact table at the grain of one row per (review_id, order_id). review_id
+      is not unique due to a known data quality issue in the Olist dataset.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - review_id
+            - order_id
     columns:
       - name: review_id
-        description: Primary key for reviews.
+        description: Review identifier. Not unique on its own — the same review_id can appear on different orders in the Olist dataset.
         tests:
           - not_null
-          - unique
       - name: order_id
         description: Foreign key linking the review to the order.
         tests:

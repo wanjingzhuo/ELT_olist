@@ -133,13 +133,17 @@ models:
               strictly: false
 
   - name: stg_order_reviews
-    description: Customer reviews submitted for orders.
+    description: Customer reviews submitted for orders. Grain is one row per (review_id, order_id) — review_id is not unique due to a known data quality issue in the Olist dataset.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - review_id
+            - order_id
     columns:
       - name: review_id
-        description: Primary key for reviews.
+        description: Review identifier. Not unique on its own — the same review_id can appear on different orders in the Olist dataset.
         tests:
           - not_null
-          - unique
       - name: order_id
         description: Foreign key to stg_orders.
         tests:
