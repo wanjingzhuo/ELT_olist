@@ -17,7 +17,7 @@ TITLE = md(
     '# Olist E-Commerce Analysis\n'
     '**Customer Loyalty · Revenue Opportunity · Geographic Coverage · Seller Health**\n\n'
     'All queries run against dbt-built mart tables in BigQuery.  \n'
-    'Switch `DATASET` below to target production vs sandbox.'
+    'All queries run against `olist_transformed_marts` in BigQuery.'
 )
 
 SETUP = code(
@@ -30,7 +30,7 @@ SETUP = code(
     '# ── Configuration ────────────────────────────────────────────────────────\n'
     "KEY_FILE = '/Users/tess/NTU/M2/Project/olist-498903-e7f8763e517a.json'\n"
     "PROJECT  = 'olist-498903'\n"
-    "DATASET  = 'olist_transformed_sandbox'   # switch to olist_transformed for prod\n"
+    "DATASET  = 'olist_transformed'\n"
     '\n'
     "MARTS     = f'{PROJECT}.{DATASET}_marts'\n"
     "STAGING   = f'{PROJECT}.{DATASET}_staging'\n"

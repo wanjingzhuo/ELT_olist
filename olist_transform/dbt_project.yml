@@ -37,3 +37,8 @@ models:
     marts:
       +materialized: table
       +schema: marts
+
+vars:
+  # Override for point-in-time analysis: dbt run --vars 'analysis_date: 2018-08-01'
+  # When null, current_analysis_date() defaults to MAX(order_purchase_timestamp) + 1 day.
+  analysis_date: null

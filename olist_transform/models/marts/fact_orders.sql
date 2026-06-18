@@ -78,3 +78,12 @@ SELECT * FROM final
 -- On-time vs late deliveries by state/seller
 -- Freight cost vs product weight
 -- Payment installment patterns
+
+-- Production note: in a live pipeline the seller join should be point-in-time to
+-- attribute each sale to the seller's location at the time of the order, not today's.
+-- Replace the dim_sellers FK lookup with a range join against snap_dim_sellers:
+--
+--   JOIN {{ ref('snap_dim_sellers') }} AS s
+--     ON oi.seller_id = s.seller_id
+--    AND o.order_purchase_timestamp >= s.dbt_valid_from
+--    AND o.order_purchase_timestamp <  COALESCE(s.dbt_valid_to, CURRENT_TIMESTAMP())
