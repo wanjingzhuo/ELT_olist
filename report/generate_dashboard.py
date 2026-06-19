@@ -246,15 +246,62 @@ def fetch():
         GROUP BY health_tier, trend_status
     """)
     intervention = q(f"""
-        SELECT seller_id, state, city, health_score, health_tier,
-               recent_health_score, score_delta, trend_status, intervention_reason
-        FROM `{MARTS}.mart_seller_health`
-        WHERE intervention_reason IS NOT NULL
+        SELECT
+            msh.seller_id, ds.zip_code, msh.state, msh.city,
+            msh.total_orders,
+            ROUND(msh.avg_review_score, 2)  AS avg_review_score,
+            ROUND(msh.on_time_rate_pct, 1)  AS on_time_rate_pct,
+            msh.health_score, msh.health_tier,
+            msh.recent_health_score, msh.score_delta,
+            msh.trend_status, msh.intervention_reason
+        FROM `{MARTS}.mart_seller_health` msh
+        JOIN `{MARTS}.dim_sellers` ds ON msh.seller_id = ds.seller_id
         ORDER BY
-            CASE trend_status WHEN 'declining' THEN 1 WHEN 'inactive' THEN 2 ELSE 3 END,
-            health_score ASC
-        LIMIT 100
+            CASE msh.trend_status WHEN 'declining' THEN 1 WHEN 'inactive' THEN 2 ELSE 3 END,
+            msh.health_score ASC
     """)
+
+    customers = q(f"""
+        SELECT
+            r.customer_unique_id,
+            dc.zip_code, dc.city, dc.state,
+            r.rfm_segment, r.campaign_type,
+            r.recency_days, r.frequency,
+            ROUND(CAST(r.monetary AS FLOAT64), 2)  AS monetary,
+            r.recency_score, r.frequency_score, r.monetary_score,
+            ROUND(r.rfm_score, 2)                  AS rfm_score,
+            FORMAT_DATE('%Y-%m', r.cohort_month)   AS cohort_month
+        FROM `{MARTS}.mart_rfm_scores` r
+        JOIN `{MARTS}.dim_customers` dc ON r.customer_unique_id = dc.customer_unique_id
+        WHERE r.rfm_segment IN ('at_risk', 'lost')
+        ORDER BY r.rfm_segment, r.monetary DESC
+    """)
+
+    # Write full customer data as JSON for async fetch (keeps HTML small)
+    docs_dir = OUT.parent
+    import json as _json
+    custs_payload = [
+        {
+            'customer_id':  r.customer_unique_id,
+            'zip_code':     str(r.zip_code) if r.zip_code else '—',
+            'city':         r.city.title() if r.city else '—',
+            'state':        r.state,
+            'segment':      r.rfm_segment,
+            'campaign':     r.campaign_type,
+            'recency_days': int(r.recency_days),
+            'frequency':    int(r.frequency),
+            'monetary':     float(r.monetary),
+            'r_score':      int(r.recency_score),
+            'f_score':      int(r.frequency_score),
+            'm_score':      int(r.monetary_score),
+            'rfm_score':    float(r.rfm_score),
+            'cohort_month': r.cohort_month,
+        }
+        for _, r in customers.iterrows()
+    ]
+    (docs_dir / 'customers.json').write_text(
+        _json.dumps(custs_payload, ensure_ascii=False), encoding='utf-8'
+    )
 
     print('  Done.')
 
@@ -318,11 +365,15 @@ def fetch():
             {'tier': r.health_tier, 'trend': r.trend_status, 'sellers': int(r.sellers)}
             for _, r in health_summary.iterrows()
         ],
-        'intervention': [
+        'sellers': [
             {
                 'seller_id':    r.seller_id[:12] + '…',
+                'zip_code':     str(r.zip_code) if r.zip_code else '—',
                 'state':        r.state,
-                'city':         r.city.title(),
+                'city':         r.city.title() if r.city else '—',
+                'total_orders': int(r.total_orders) if r.total_orders else 0,
+                'avg_review':   _f(r.avg_review_score),
+                'on_time_pct':  _f(r.on_time_rate_pct),
                 'health_score': float(r.health_score),
                 'health_tier':  r.health_tier,
                 'recent_score': _f(r.recent_health_score),
@@ -535,6 +586,7 @@ section{margin-bottom:52px;scroll-margin-top:16px}
 
 /* Legend overlaid on bottom-right corner of map */
 #map-wrap{position:relative}
+.leaflet-interactive:focus{outline:none}
 #map-legend{
   position:absolute;bottom:18px;right:18px;z-index:999;
   background:rgba(255,255,255,.93);border:1px solid var(--border);
@@ -557,7 +609,7 @@ section{margin-bottom:52px;scroll-margin-top:16px}
   --ag-cell-horizontal-padding:14px;
 }
 .ag-theme-alpine .ag-header-cell-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
-#grid-bar{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
+#grid-bar,#customer-grid-bar{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
 .g-btn{
   padding:6px 16px;border-radius:6px;
   border:1px solid var(--border);background:var(--bg);
@@ -566,8 +618,15 @@ section{margin-bottom:52px;scroll-margin-top:16px}
 }
 .g-btn:hover{background:#fff;color:var(--text2);border-color:var(--border2)}
 .g-btn.active{background:var(--primary);color:#fff;border-color:var(--primary);box-shadow:0 1px 4px rgba(29,78,216,.3)}
-#grid-count{font-size:11px;color:var(--muted);margin-left:auto;font-weight:500}
-#active-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;min-height:4px}
+#grid-sub-bar{display:none;gap:6px;margin-bottom:10px;align-items:center}
+#grid-sub-bar.show{display:flex}
+.g-sub-btn{padding:3px 11px;font-size:11px;border-radius:20px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;font-weight:500;transition:all .15s}
+.g-sub-btn:hover{background:#fff;border-color:var(--border2)}
+.g-sub-btn.active{background:#1E3A8A;color:#fff;border-color:#1E3A8A}
+.btn-dl{padding:5px 14px;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;display:flex;align-items:center;gap:5px;transition:all .15s}
+.btn-dl:hover{background:#F0FDF4;border-color:#16A34A;color:#16A34A}
+#grid-count,#customer-grid-count{font-size:11px;color:var(--muted);margin-left:auto;font-weight:500}
+#active-chips,#active-customer-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;min-height:4px}
 .chip{
   display:flex;align-items:center;gap:5px;
   background:var(--primary-l);border:1px solid var(--primary-m);
@@ -687,6 +746,22 @@ section{margin-bottom:52px;scroll-margin-top:16px}
           <div id="chart-cats" style="height:340px"></div>
         </div>
       </div>
+      <div class="card" style="margin-top:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div>
+            <div class="card-title" style="margin-bottom:2px">Campaign Customer List</div>
+            <div style="font-size:11px;color:var(--muted)">At-Risk &amp; Lost customers · click a state on the map to filter · Download CSV exports the current view</div>
+          </div>
+          <button class="btn-dl" id="btn-dl-customers" onclick="downloadCustomerCSV()">&#8595; Download CSV</button>
+        </div>
+        <div id="customer-grid-bar">
+          <button class="g-btn active" data-seg="at_risk">At-Risk (Winback)</button>
+          <button class="g-btn" data-seg="lost">Lost (Reactivation)</button>
+          <span id="customer-grid-count"></span>
+        </div>
+        <div id="active-customer-chips"></div>
+        <div id="customer-grid" class="ag-theme-alpine" style="height:480px"></div>
+      </div>
     </section>
 
     <!-- SELLER HEALTH ────────────────────────────────────────── -->
@@ -713,15 +788,23 @@ section{margin-bottom:52px;scroll-margin-top:16px}
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Seller Intervention List</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div class="card-title" style="margin-bottom:0">Seller List</div>
+          <button class="btn-dl" onclick="exportSellerCSV()">&#8595; Download CSV</button>
+        </div>
         <div id="grid-bar">
-          <button class="g-btn active" data-tf="all">All</button>
-          <button class="g-btn" data-tf="declining">Declining</button>
-          <button class="g-btn" data-tf="inactive">Inactive</button>
+          <button class="g-btn active" data-if="intervention">Required Intervention</button>
+          <button class="g-btn" data-if="all">All (selected state only)</button>
           <span id="grid-count"></span>
         </div>
+        <div id="grid-sub-bar">
+          <span style="font-size:11px;color:#94A3B8;font-weight:600;margin-right:2px">Trend:</span>
+          <button class="g-sub-btn active" data-tf="all">All Types</button>
+          <button class="g-sub-btn" data-tf="declining">Declining</button>
+          <button class="g-sub-btn" data-tf="inactive">Inactive</button>
+        </div>
         <div id="active-chips"></div>
-        <div id="intervention-grid" class="ag-theme-alpine" style="height:420px"></div>
+        <div id="intervention-grid" class="ag-theme-alpine" style="height:480px"></div>
       </div>
     </section>
 
@@ -807,8 +890,9 @@ const MODES = {
 };
 
 // ── Cross-filter state ────────────────────────────────────────
-const F = { state:null, tier:null, trend:null, scoreMin:null, scoreMax:null, trendBtn:'all' };
+const F = { state:null, tier:null, trend:null, scoreMin:null, scoreMax:null, intFilter:'intervention', trendBtn:'all', custSeg:'at_risk' };
 let gridApi = null;
+let customerGridApi = null;
 let mapMarkers = [];
 let _chips = [];
 
@@ -1123,6 +1207,64 @@ function initCustomers(){
     ]
   });
   window.addEventListener('resize',()=>catCh.resize());
+
+  // ── Customer campaign grid ──────────────────────────────────
+  customerGridApi = agGrid.createGrid(document.getElementById('customer-grid'),{
+    columnDefs:[
+      {field:'customer_id', headerName:'Customer ID', width:200,
+        cellStyle:{fontFamily:'monospace',color:'#94A3B8',fontSize:'11px'},
+        cellRenderer:p=>p.value?p.value.substring(0,16)+'…':''
+      },
+      {field:'state',       headerName:'State',       width:68},
+      {field:'city',        headerName:'City',        width:130},
+      {field:'zip_code',    headerName:'Zip',         width:72},
+      {field:'segment',     headerName:'Segment',     width:105,
+        cellRenderer:p=>{
+          const c=SEG_CLR[p.value]||'#94A3B8';
+          return '<span style="background:'+c+'18;color:'+c+';padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">'+p.value.replace('_',' ')+'</span>';
+        }},
+      {field:'campaign',    headerName:'Campaign',    width:110,
+        cellRenderer:p=>{
+          const c=CAMP_CLR[p.value]||'#94A3B8';
+          return '<span style="background:'+c+'18;color:'+c+';padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">'+p.value+'</span>';
+        }},
+      {field:'recency_days',headerName:'Recency (d)', width:100, type:'numericColumn'},
+      {field:'frequency',   headerName:'Orders',      width:75,  type:'numericColumn'},
+      {field:'monetary',    headerName:'Spend (R$)',  width:100, type:'numericColumn',
+        valueFormatter:p=>p.value!=null?'R$'+p.value.toLocaleString(undefined,{minimumFractionDigits:2}):'—'},
+      {field:'r_score',     headerName:'R',           width:52,  type:'numericColumn'},
+      {field:'f_score',     headerName:'F',           width:52,  type:'numericColumn'},
+      {field:'m_score',     headerName:'M',           width:52,  type:'numericColumn'},
+      {field:'rfm_score',   headerName:'RFM',         width:68,  type:'numericColumn',
+        valueFormatter:p=>p.value!=null?p.value.toFixed(2):'—'},
+      {field:'cohort_month',headerName:'1st Order',   width:90},
+    ],
+    rowData:[],
+    defaultColDef:{resizable:true,sortable:true,filter:true},
+    getRowStyle:p=>{const c={at_risk:'#F97316',lost:'#EF4444'};return{borderLeft:'3px solid '+(c[p.data?.segment]||'#E2E8F0')}},
+    rowHeight:40,headerHeight:40,animateRows:true,
+  });
+
+  document.querySelectorAll('#customer-grid-bar .g-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.querySelectorAll('#customer-grid-bar .g-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      F.custSeg=btn.dataset.seg;
+      applyFilters();
+    });
+  });
+
+  // Load full customer data asynchronously — keeps HTML small
+  document.getElementById('customer-grid-count').textContent='Loading…';
+  fetch('customers.json')
+    .then(r=>r.json())
+    .then(data=>{
+      D.customers=data;
+      applyFilters();
+    })
+    .catch(()=>{
+      document.getElementById('customer-grid-count').textContent='Could not load customer data';
+    });
 }
 
 // ── Sellers ───────────────────────────────────────────────────
@@ -1132,7 +1274,7 @@ function initSellers(){
   const avgScore=scores.reduce((a,b)=>a+b,0)/total;
   const skCards=[
     {raw:total,               f:v=>Math.round(v).toLocaleString(), lbl:'Total Sellers',      cls:''},
-    {raw:D.intervention.length,f:v=>Math.round(v).toLocaleString(),lbl:'Need Intervention',  cls:'amber'},
+    {raw:D.sellers.filter(s=>s.reason).length,f:v=>Math.round(v).toLocaleString(),lbl:'Need Intervention',  cls:'amber'},
     {raw:avgScore,            f:v=>v.toFixed(1)+' / 100',          lbl:'Avg Health Score',   cls:'green'},
   ];
   const sg=document.getElementById('seller-kpis');
@@ -1208,29 +1350,33 @@ function initSellers(){
   gridApi=agGrid.createGrid(document.getElementById('intervention-grid'),{
     columnDefs:[
       {field:'seller_id',headerName:'Seller ID',width:130,cellStyle:{fontFamily:'monospace',color:'#94A3B8',fontSize:'11px'}},
-      {field:'state',headerName:'State',width:70},
-      {field:'city',headerName:'City',width:130},
+      {field:'zip_code',headerName:'Zip',width:75,hide:false},
+      {field:'state',headerName:'State',width:68},
+      {field:'city',headerName:'City',width:120},
+      {field:'total_orders',headerName:'Orders',width:78,type:'numericColumn'},
+      {field:'avg_review',headerName:'Review',width:78,type:'numericColumn',valueFormatter:p=>p.value!=null?p.value.toFixed(2)+'★':'—'},
+      {field:'on_time_pct',headerName:'On-Time%',width:88,type:'numericColumn',valueFormatter:p=>p.value!=null?p.value.toFixed(1)+'%':'—'},
       {field:'health_score',headerName:'Health',width:120,sort:'asc',
         cellRenderer:p=>{
           const c=p.value<40?'#EF4444':p.value<60?'#F97316':p.value<80?'#F59E0B':'#10B981';
           const tc=TC[p.data.health_tier]||'#94A3B8';
           return '<span style="font-weight:700;color:'+c+'">'+p.value+'</span> <span style="background:'+tc+'18;color:'+tc+';padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">'+(p.data.health_tier||'').replace('_',' ')+'</span>';
         }},
-      {field:'recent_score',headerName:'Recent',width:80,valueFormatter:p=>p.value??'—'},
-      {field:'score_delta',headerName:'Delta',width:72,
+      {field:'recent_score',headerName:'Recent',width:78,valueFormatter:p=>p.value??'—'},
+      {field:'score_delta',headerName:'Delta',width:70,
         cellRenderer:p=>{
           if(p.value==null) return '—';
           const c=p.value<0?'#EF4444':'#10B981';
           return '<span style="color:'+c+';font-weight:700">'+(p.value>0?'+':'')+p.value.toFixed(1)+'</span>';
         }},
-      {field:'trend_status',headerName:'Trend',width:95,
+      {field:'trend_status',headerName:'Trend',width:90,
         cellRenderer:p=>{
           const c=TRC[p.value]||'#94A3B8';
           return '<span style="background:'+c+'18;color:'+c+';padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">'+p.value+'</span>';
         }},
-      {field:'reason',headerName:'Reason',flex:1,minWidth:160,cellStyle:{color:'#64748B',fontSize:'11px'}},
+      {field:'reason',headerName:'Reason',flex:1,minWidth:140,cellStyle:{color:'#64748B',fontSize:'11px'}},
     ],
-    rowData:D.intervention,
+    rowData:[],
     defaultColDef:{resizable:true,sortable:true,filter:true},
     getRowStyle:p=>{const c={declining:'#EF4444',inactive:'#94A3B8',stable:'#1D4ED8'};return{borderLeft:'3px solid '+(c[p.data?.trend_status]||'#E2E8F0')}},
     rowHeight:44,headerHeight:40,animateRows:true,
@@ -1239,6 +1385,17 @@ function initSellers(){
   document.querySelectorAll('.g-btn').forEach(btn=>{
     btn.addEventListener('click',()=>{
       document.querySelectorAll('.g-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      F.intFilter=btn.dataset.if;
+      F.trendBtn='all';
+      document.querySelectorAll('.g-sub-btn').forEach((b,i)=>b.classList.toggle('active',i===0));
+      document.getElementById('grid-sub-bar').classList.toggle('show', F.intFilter==='intervention');
+      applyFilters();
+    });
+  });
+  document.querySelectorAll('.g-sub-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.querySelectorAll('.g-sub-btn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
       F.trendBtn=btn.dataset.tf;
       applyFilters();
@@ -1249,15 +1406,31 @@ function initSellers(){
 // ── Filter logic ──────────────────────────────────────────────
 function applyFilters(){
   if(!gridApi) return;
-  let rows=D.intervention;
-  if(F.state) rows=rows.filter(r=>r.state===F.state);
+  let rows;
+  if(F.state && F.intFilter==='all'){
+    rows=D.sellers.filter(r=>r.state===F.state);
+  } else {
+    rows=D.sellers.filter(r=>r.reason);
+    if(F.state) rows=rows.filter(r=>r.state===F.state);
+    if(F.trendBtn&&F.trendBtn!=='all') rows=rows.filter(r=>r.trend_status===F.trendBtn);
+  }
   if(F.tier)  rows=rows.filter(r=>r.health_tier===F.tier);
   if(F.trend) rows=rows.filter(r=>r.trend_status===F.trend);
-  if(F.trendBtn&&F.trendBtn!=='all') rows=rows.filter(r=>r.trend_status===F.trendBtn);
   if(F.scoreMin!=null) rows=rows.filter(r=>r.health_score>=F.scoreMin);
   if(F.scoreMax!=null) rows=rows.filter(r=>r.health_score<=F.scoreMax);
   gridApi.setGridOption('rowData',rows);
-  document.getElementById('grid-count').textContent=rows.length+' sellers';
+  document.getElementById('grid-count').textContent=rows.length+' seller'+(rows.length!==1?'s':'');
+
+  // ── Customer grid ──────────────────────────────────────────
+  if(customerGridApi && D.customers){
+    let crows=D.customers.filter(r=>r.segment===F.custSeg);
+    if(F.state) crows=crows.filter(r=>r.state===F.state);
+    customerGridApi.setGridOption('rowData',crows);
+    document.getElementById('customer-grid-count').textContent=crows.length.toLocaleString()+' customer'+(crows.length!==1?'s':'');
+    const chips=[];
+    if(F.state) chips.push('<div class="chip" onclick="F.state=null;applyFilters()">x State: '+F.state+'</div>');
+    document.getElementById('active-customer-chips').innerHTML=chips.join('');
+  }
   _chips=[];
   if(F.state)  _chips.push({l:'State: '+F.state,                    clr:()=>{F.state=null}});
   if(F.tier)   _chips.push({l:'Tier: '+F.tier.replace('_',' '),     clr:()=>{F.tier=null}});
@@ -1269,9 +1442,28 @@ function applyFilters(){
   document.getElementById('filter-list-text').textContent=hasF?_chips.map(c=>c.l).join(', '):'None';
 }
 
+function exportSellerCSV(){
+  gridApi.exportDataAsCsv({
+    fileName:'olist_sellers_'+(F.state||'intervention')+'.csv',
+    columnKeys:['seller_id','zip_code','state','city','total_orders','avg_review','on_time_pct','health_score','health_tier','recent_score','score_delta','trend_status','reason'],
+  });
+}
+
+function downloadCustomerCSV(){
+  if(!customerGridApi) return;
+  customerGridApi.exportDataAsCsv({
+    fileName:'olist_customers_'+F.custSeg+(F.state?'_'+F.state:'')+'.csv',
+    columnKeys:['customer_id','zip_code','state','city','segment','campaign','recency_days','frequency','monetary','r_score','f_score','m_score','rfm_score','cohort_month'],
+  });
+}
+
 function clearAllFilters(){
-  F.state=null;F.tier=null;F.trend=null;F.scoreMin=null;F.scoreMax=null;F.trendBtn='all';
-  document.querySelectorAll('.g-btn').forEach((b,i)=>b.classList.toggle('active',i===0));
+  F.state=null;F.tier=null;F.trend=null;F.scoreMin=null;F.scoreMax=null;
+  F.intFilter='intervention';F.trendBtn='all';F.custSeg='at_risk';
+  document.querySelectorAll('#grid-bar .g-btn').forEach((b,i)=>b.classList.toggle('active',i===0));
+  document.querySelectorAll('.g-sub-btn').forEach((b,i)=>b.classList.toggle('active',i===0));
+  document.getElementById('grid-sub-bar').classList.add('show');
+  document.querySelectorAll('#customer-grid-bar .g-btn').forEach((b,i)=>b.classList.toggle('active',i===0));
   applyFilters();
 }
 
@@ -1301,7 +1493,7 @@ initGeo();
 initCustomers();
 initSellers();
 initScrollSpy();
-document.getElementById('grid-count').textContent=D.intervention.length+' sellers';
+document.getElementById('grid-count').textContent=D.sellers.filter(s=>s.reason).length+' sellers';
 </script>
 </body>
 </html>"""
@@ -1309,7 +1501,9 @@ document.getElementById('grid-count').textContent=D.intervention.length+' seller
 
 def build_html(data):
     data_json = json.dumps(data, cls=BQEncoder, ensure_ascii=False)
-    return HTML_TEMPLATE.replace('/*INLINE_DATA*/', f'const D = {data_json};')
+    # JSON.parse() is ~10x faster than a JS object literal for large payloads
+    escaped = data_json.replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
+    return HTML_TEMPLATE.replace('/*INLINE_DATA*/', f'const D = JSON.parse(`{escaped}`);')
 
 
 def main():

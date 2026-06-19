@@ -94,7 +94,7 @@ def generate_dashboard(context: AssetExecutionContext) -> None:
 @asset(deps=[generate_dashboard])
 def git_push_dashboard(context: AssetExecutionContext) -> None:
     """Commit and push the refreshed dashboard HTML to GitHub Pages."""
-    _run(["git", "add", "docs/index.html"], cwd=_REPO_ROOT)
+    _run(["git", "add", "docs/index.html", "docs/customers.json"], cwd=_REPO_ROOT)
     try:
         _run(
             ["git", "commit", "-m", "dashboard: automated data refresh"],
