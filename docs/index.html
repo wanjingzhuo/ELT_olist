@@ -1048,6 +1048,22 @@ function applyFilters(){
       tierCh.setOption({series:[{data:tierOrder.map(t=>({name:t.replace('_',' '),value:tC[t]||0,itemStyle:{color:TIER_CLR[t]}}))}]});
       trendCh.setOption({series:[{data:trendOrder.map(t=>({name:t,value:trC[t]||0,itemStyle:{color:TREND_CLR[t]}}))}]});
     }
+    // Update seller KPI cards
+    const _kpiSellers = _ss || D.sellers;
+    const _kpiAvg = _kpiSellers.length ? _kpiSellers.reduce((a,s)=>a+s.health_score,0)/_kpiSellers.length : 0;
+    const _kpiCards = [
+      {raw:_kpiSellers.length,                     f:v=>Math.round(v).toLocaleString(), lbl:'Total Sellers',      cls:''},
+      {raw:_kpiSellers.filter(s=>s.reason).length, f:v=>Math.round(v).toLocaleString(), lbl:'Need Intervention',  cls:'amber'},
+      {raw:_kpiAvg,                                f:v=>v.toFixed(1)+' / 100',          lbl:'Avg Health Score',   cls:'green'},
+    ];
+    const _sg=document.getElementById('seller-kpis');
+    _sg.innerHTML=_kpiCards.map(c=>'<div class="kpi-card '+c.cls+'"><div class="kpi-v">'+c.f(c.raw)+'</div><div class="kpi-l">'+c.lbl+'</div></div>').join('');
+    _sg.querySelectorAll('.kpi-v').forEach((el,i)=>countUp(el,_kpiCards[i].raw,_kpiCards[i].f));
+    // Update section subtitle
+    const _ssub=document.querySelector('#s-sellers .sec-sub');
+    if(_ssub) _ssub.textContent=F.state
+      ?'Filtered to '+F.state+' — click the same state again to reset'
+      :'Health distribution, trend status, and intervention priority list';
   }
   let rows;
   if(F.state && F.intFilter==='all'){
